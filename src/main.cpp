@@ -14,11 +14,13 @@
 #define MAX_RACE_TIME_IN_SECONDS 9.999
 #define NUM_LANES 4
 
+// https://grandprix-software-central.com/index.php/software/faq/faq/95-gprm-custom - Details for GPRM
 #define COMMAND_GATE_CHECK 'G'                         //This command will ask the timer to check if the start gate is open or not.
 #define COMMAND_TIMER_RESET 'R'                        //This command will tell the timer to reset itself so it is ready for the next heat. Any results or indications of finish order should be cleared from the computer screen and the timer's display.
 #define COMMAND_FORCE_DATA_SEND 'F'                    //This command is used if you want to halt the timing (e.g. a car doesn't finish or there is an empty lane). If supported by the timer, pressing the Escape key will prompt the timer to return whatever data that it does have. In this case, any cars that had not finished will be given the maximum time. This command is not necessary if the timer sends the data for a lane as soon as the lane has finished timing. If the timer doesn't support this command, then you must wait until the timer times out before the results will be displayed on screen.
-const char *RESPONSE_TIMER_READY = "READY";            //This command will tell the timer to reset itself s  o it is ready for the next heat. Any results or indications of finish order should be cleared from the computer screen and the timer's display.
-const char *RESPONSE_GATE_OPEN = "OPEN";               //This is the response that the timer will send back to indicate that the start gate is open.
+const char *RESPONSE_TIMER_READY = "READY";            //This command will tell the timer to reset itself so it is ready for the next heat. Any results or indications of finish order should be cleared from the computer screen and the timer's display.
+const char *RESPONSE_GATE_OPEN = "GATE OPEN";          //This is the response that the timer will send back to indicate that the start gate is open.
+const char *RESPONSE_GATE_CLOSED = "GATE CLOSED";      //This is the response that the timer will send back to indicate that the start gate is closed.
 const char *RESPONSE_TIMER_STARTED_MESSAGE = "RACING"; //This is the message that the timer will send back to indicate that the heat has started (start gate has opened).
 
 const uint8_t ANALOG_PINS[NUM_LANES] = {33, 32, 39, 36}; //, 31, 35, 25, 26}; // 1st four are right, unsure about the rest
@@ -53,11 +55,6 @@ unsigned long raceBegin = 0;
 unsigned long raceEnd = 0;
 
 Bounce trigger = Bounce();
-
-// int lane4 = 0;
-// int lane3 = 0;
-// int lane2 = 0;
-// int lane1 = 0;
 const unsigned long MAX_LONG = 4294967295;
 
 // SET A VARIABLE TO STORE THE LED STATE
@@ -223,7 +220,6 @@ void loop()
     raceStatus = pollLanes();
     break;
   case RaceDone:
-    //send scores
     outputRaceTimes();
     raceStatus = Idle;
     break;
@@ -245,15 +241,15 @@ void loop()
     case COMMAND_GATE_CHECK:
       if (triggerStatus == ReadyToRelease)
       {
-        Serial.println("GATE CLOSED");
+        Serial.println(RESPONSE_GATE_CLOSED);
       }
       else
       {
-        Serial.println("GATE OPEN");
+        Serial.println(RESPONSE_GATE_OPEN);
       }
       break;
     case COMMAND_FORCE_DATA_SEND:
-      outputRaceTimes();
+      outputRaceTimes(); //TODO This really isn't fully/properly implmented.
       break;
     case COMMAND_TIMER_RESET:
       initializeLanesForRacing(Finished);

@@ -1,11 +1,9 @@
-/*
-  ESP 32 Blink
-  Turns on an LED on for one second, then off for one second, repeatedly.
-  The ESP32 has an internal blue LED at D2 (GPIO 02)
-
-*/
 #include <Arduino.h>
 #include <Bounce2.h>
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
 #define ANALOG_PIN_LANE_4 36 //4
 #define ANALOG_PIN_LANE_3 39 //3
@@ -13,15 +11,25 @@
 #define ANALOG_PIN_LANE_1 33 //1
 #define TRIGGER_PIN 2
 #define SENSOR_THRESHOLD 4000
+#define MAX_RACE_TIME_IN_SECONDS 9.999
 #define NUM_LANES 4
+
+#define COMMAND_GATE_CHECK 'G'                         //This command will ask the timer to check if the start gate is open or not.
+#define COMMAND_TIMER_RESET 'R'                        //This command will tell the timer to reset itself so it is ready for the next heat. Any results or indications of finish order should be cleared from the computer screen and the timer's display.
+#define COMMAND_FORCE_DATA_SEND 'F'                    //This command is used if you want to halt the timing (e.g. a car doesn't finish or there is an empty lane). If supported by the timer, pressing the Escape key will prompt the timer to return whatever data that it does have. In this case, any cars that had not finished will be given the maximum time. This command is not necessary if the timer sends the data for a lane as soon as the lane has finished timing. If the timer doesn't support this command, then you must wait until the timer times out before the results will be displayed on screen.
+const char *RESPONSE_TIMER_READY = "READY";            //This command will tell the timer to reset itself s  o it is ready for the next heat. Any results or indications of finish order should be cleared from the computer screen and the timer's display.
+const char *RESPONSE_GATE_OPEN = "OPEN";               //This is the response that the timer will send back to indicate that the start gate is open.
+const char *RESPONSE_TIMER_STARTED_MESSAGE = "RACING"; //This is the message that the timer will send back to indicate that the heat has started (start gate has opened).
+
 const uint8_t ANALOG_PINS[NUM_LANES] = {33, 32, 39, 36}; //, 31, 35, 25, 26}; // 1st four are right, unsure about the rest
 
 enum LaneStatus
 {
   Racing,
-  Finished
+  Finished,
+  TooSlow
 };
-enum TriggerStatus 
+enum TriggerStatus //aka Gate
 {
   ReadyToRelease,
   Released
@@ -29,10 +37,8 @@ enum TriggerStatus
 enum RaceStatus
 {
   Idle,
-  ReadyToRace,
   RaceInProgress,
-  RaceDone,
-  ScoresSent
+  RaceDone
 };
 struct LaneInfo
 {
@@ -41,6 +47,7 @@ struct LaneInfo
 };
 LaneInfo *Lanes = new LaneInfo[NUM_LANES];
 RaceStatus raceStatus;
+TriggerStatus triggerStatus;
 
 unsigned long raceBegin = 0;
 unsigned long raceEnd = 0;
@@ -58,29 +65,59 @@ int ledState = HIGH;
 int LED_PIN = LED_BUILTIN;
 //bool isRaceInProgress = false;
 
+float getTimeInSeconds(unsigned long raceBeginTime, unsigned long endTime)
+{
+  unsigned long durationInMicros = 0;
+  if (endTime < raceBeginTime)
+  {
+    //we overflowed the micros() limit (about every 50 minutes of ON time)
+    durationInMicros = (MAX_LONG - raceBeginTime) + endTime;
+  }
+  else
+  {
+    durationInMicros = endTime - raceBeginTime;
+  }
+  return (durationInMicros / 1000000.0);
+}
+
+RaceStatus checkForTooLongOfARace()
+{
+  if (getTimeInSeconds(raceBegin, micros()) > MAX_RACE_TIME_IN_SECONDS)
+  {
+    //abort race, too long;
+    unsigned long finishTimeForSlowRacers = micros() + 1000000;
+    for (unsigned short int i = 0; i < NUM_LANES; i++)
+    {
+      if (Lanes[i].status != Finished)
+      {
+        Lanes[i].finishTime = finishTimeForSlowRacers;
+        Lanes[i].status = TooSlow;
+      }
+    }
+    raceEnd = micros();
+    return RaceDone;
+  }
+  return RaceInProgress;
+}
 
 RaceStatus pollLanes()
 {
   //poll lanes
-  int finishCount = 0;
-  char buffer[200];
-  for (int i = 0; i < NUM_LANES; i++)
+  unsigned short int finishCount = 0;
+  for (unsigned short int i = 0; i < NUM_LANES; i++)
   {
     if (Lanes[i].status == Racing)
     {
       uint16_t sensorValue = analogRead(ANALOG_PINS[i]);
-      sprintf(buffer, "Lane %d sensorValue: %d", i, sensorValue);
-      Serial.println(buffer);
+      //sprintf(buffer, "Lane %d sensorValue: %d", i, sensorValue);
+      //Serial.println(buffer);
       if (sensorValue < SENSOR_THRESHOLD)
       {
         //sensor tripped, record time
         Lanes[i].finishTime = micros();
         Lanes[i].status = Finished;
-        //send scores
-        
-        sprintf(buffer, "Lane %d: %lu", i, Lanes[i].finishTime);
-        Serial.println(buffer);
-        delay(250);
+        //sprintf(buffer, "Lane %d: %lu", i, Lanes[i].finishTime);
+        //Serial.println(buffer);
         finishCount++;
       }
     }
@@ -92,17 +129,29 @@ RaceStatus pollLanes()
   }
   if (finishCount >= NUM_LANES)
   {
+    raceEnd = micros();
     return RaceDone;
   }
-  return RaceInProgress;
+
+  return checkForTooLongOfARace();
 }
 
-void initializeLanesForRacing(LaneStatus newLaneStatus) {
+void initializeLanesForRacing(LaneStatus newLaneStatus)
+{
   for (int i = 0; i < NUM_LANES; i++)
   {
     Lanes[i].finishTime = 0;
     Lanes[i].status = newLaneStatus;
   }
+}
+
+TriggerStatus getTriggerStatus(int input)
+{
+  if (input == LOW)
+  {
+    return ReadyToRelease;
+  }
+  return Released;
 }
 
 void setup()
@@ -121,112 +170,103 @@ void setup()
 
   // DEBOUNCE INTERVAL IN MILLISECONDS
   trigger.interval(25); // interval in ms
-
   raceStatus = Idle;
-  initializeLanesForRacing(Finished);
-  if (trigger.read() == LOW) {
-    raceStatus = ReadyToRace;
+  trigger.update();
+  triggerStatus = getTriggerStatus(trigger.read());
+}
+
+void outputRaceTimes()
+{
+  for (int i = 0; i < NUM_LANES; i++)
+  {
+    Serial.printf("%d %3.4f  ", (i + 1), getTimeInSeconds(raceBegin, Lanes[i].finishTime));
+  }
+  Serial.println();
+}
+
+void updateLEDs()
+{
+  if (raceStatus == RaceInProgress)
+  {
+    digitalWrite(LED_PIN, LOW);
+  }
+  else
+  {
+    digitalWrite(LED_PIN, HIGH);
   }
 }
 
-
 void loop()
 {
-  //digitalWrite(LED_PIN, HIGH);   // turn the LED on (HIGH is the voltage level)
-  //delay(200);                       // wait for a second
-  //digitalWrite(LED_PIN, LOW);    // turn the LED off by making the voltage LOW
-  //delay(50);  // wait for a second
-
-  // Update the Bounce instance (YOU MUST DO THIS EVERY LOOP)
   trigger.update();
+  if (trigger.changed())
+  {
+    int deboucedInput = trigger.read();
+    triggerStatus = getTriggerStatus(deboucedInput);
+    if (raceStatus != RaceInProgress && triggerStatus == Released)
+    {
+      initializeLanesForRacing(Racing);
+      Serial.println(RESPONSE_TIMER_STARTED_MESSAGE);
+      raceBegin = micros();
+      raceStatus = RaceInProgress;
+      updateLEDs();
+      delay(1000);
+    }
+  }
 
-  //check to see
+  updateLEDs();
+
+  //handle state changes
   switch (raceStatus)
   {
   case RaceInProgress:
     raceStatus = pollLanes();
-    Serial.println("RaceInProgress");
-    break;
-  case ReadyToRace:
-    //watch for trigger to be thrown which means race started.
-    if (trigger.changed())
-    {
-      int deboucedInput = trigger.read();
-      if (deboucedInput == HIGH)
-      {
-        initializeLanesForRacing(Racing);
-        raceStatus = RaceInProgress;
-      }
-    }
-    Serial.println("ReadyToRace");
     break;
   case RaceDone:
-    //dunno
-    Serial.println("done");
     //send scores
-    char buffer[200];
-    sprintf(buffer, "Lane 1: %lu, Lane 2: %lu, Lane 3: %lu Lane 4: %lu", Lanes[0].finishTime, Lanes[1].finishTime, Lanes[2].finishTime, Lanes[3].finishTime);
-    Serial.println(buffer);
-    
-    raceStatus = ScoresSent;
-    break;
-  case ScoresSent:
-    Serial.println("ScoresSent");
-    delay(3000);
-    //watch for trigger to be set
-    if (trigger.changed())
-    {
-      int deboucedInput = trigger.read();
-      if (deboucedInput == LOW)
-      {
-        raceStatus = ReadyToRace;
-      }
-    }
+    outputRaceTimes();
+    raceStatus = Idle;
     break;
   case Idle:
-    //watch for trigger to be set
-    if (trigger.changed())
-    {
-      int deboucedInput = trigger.read();
-      if (deboucedInput == LOW)
-      {
-        raceStatus = ReadyToRace;
-      }
-    }
-    
-    Serial.println("Idle");
     break;
   default:
     Serial.println("Unknown Status");
     break;
   }
 
-  if (raceStatus == RaceInProgress)  {
-    digitalWrite(LED_PIN, LOW);
-  } else {
-    digitalWrite(LED_PIN, HIGH);
+  //sniff for incoming commands from software via the serial connection
+  int incomingByte = 0; // for incoming serial data
+  if (Serial.available() > 0)
+  {
+    //read the incoming byte
+    incomingByte = Serial.read();
+    switch (incomingByte)
+    {
+    case COMMAND_GATE_CHECK:
+      if (triggerStatus == ReadyToRelease)
+      {
+        Serial.println("GATE CLOSED");
+      }
+      else
+      {
+        Serial.println("GATE OPEN");
+      }
+      break;
+    case COMMAND_FORCE_DATA_SEND:
+      outputRaceTimes();
+      break;
+    case COMMAND_TIMER_RESET:
+      initializeLanesForRacing(Finished);
+      if (triggerStatus == ReadyToRelease)
+      {
+        Serial.println(RESPONSE_TIMER_READY);
+      }
+      else
+      {
+        Serial.println("GATE OPEN");
+      }
+    default:
+      break;
+    }
   }
-
-  // // <Bounce>.changed() RETURNS true IF THE STATE CHANGED (FROM HIGH TO LOW OR LOW TO HIGH)
-  // if (trigger.changed())
-  // {
-  //   int deboucedInput = trigger.read();
-  //   // IF THE CHANGED VALUE IS LOW
-  //   if (deboucedInput == HIGH)
-  //   {
-  //     ledState = !ledState;            // SET ledState TO THE OPPOSITE OF ledState
-  //     digitalWrite(LED_PIN, ledState); // WRITE THE NEW ledState
-  //   }
-  // }
-
-  // lane4 = analogRead(ANALOG_PIN_LANE_4);
-  // lane3 = analogRead(ANALOG_PIN_LANE_3);
-  // lane2 = analogRead(ANALOG_PIN_LANE_2);
-  // lane1 = analogRead(ANALOG_PIN_LANE_1);
-  // //unsigned long time = micros();
-
-
-  
-  //delay(100); 
 }
-

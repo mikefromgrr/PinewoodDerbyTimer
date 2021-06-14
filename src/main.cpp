@@ -2,8 +2,9 @@
 #include <Bounce2.h>
 #include <SPI.h>
 #include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+// #include <Adafruit_GFX.h>
+// #include <Adafruit_SSD1306.h>
+#include <TimerScreen.h>
 
 #define ANALOG_PIN_LANE_4 36 //4
 #define ANALOG_PIN_LANE_3 39 //3
@@ -54,6 +55,7 @@ TriggerStatus triggerStatus;
 unsigned long raceBegin = 0;
 unsigned long raceEnd = 0;
 
+TimerScreen screen;
 Bounce trigger = Bounce();
 const unsigned long MAX_LONG = 4294967295;
 
@@ -159,6 +161,10 @@ void setup()
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, ledState);
 
+  screen = TimerScreen();
+  screen.setup();
+  screen.print("aaaa");
+screen.print("bbbb");
   // SELECT ONE OF THE FOLLOWING :
   // 1) IF YOUR INPUT HAS AN INTERNAL PULL-UP
   // bounce.attach( BOUNCE_PIN ,  INPUT_PULLUP ); // USE INTERNAL PULL-UP
@@ -174,11 +180,23 @@ void setup()
 
 void outputRaceTimes()
 {
+  char buffer[200];
+  //sprintf(buffer, "Lane %d sensorValue: %d", i, sensorValue);
+  //sprintf(buffer, "Lane %d sensorValue: %d", i, sensorValue);
+  String result;
+  result.clear();
+
   for (int i = 0; i < NUM_LANES; i++)
   {
+    //to serial
     Serial.printf("%d %3.4f  ", (i + 1), getTimeInSeconds(raceBegin, Lanes[i].finishTime));
+    
+    //for screen
+    sprintf(buffer,"%d %3.4f\n", (i + 1), getTimeInSeconds(raceBegin, Lanes[i].finishTime));
+    result.concat(buffer);
   }
   Serial.println();
+  screen.displayResults(result);
 }
 
 void updateLEDs()

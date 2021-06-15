@@ -31,9 +31,7 @@
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 
-TimerScreen::TimerScreen() {
-  Serial.println("TimerScreen constructor called");
-}
+TimerScreen::TimerScreen() {}
 
 void TimerScreen::setup() {
 
@@ -42,22 +40,16 @@ void TimerScreen::setup() {
     for(;;); // Don't proceed, loop forever
   }
 
-   //display.display();
-    display.clearDisplay();
-    display.setTextSize(2);
-    display.setTextColor(SSD1306_WHITE);
-  //  display.display(); // actually display all of the above
-    
-    display.println("ABCDEFG\n123");
-    //display.println("B23456789012345678901234567890");
-    display.display();
-  
+  //display.display();
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setTextColor(SSD1306_WHITE);
 }
 
-void TimerScreen::print(String s) { 
-   display.println(s);
-   display.display();
-   Serial.println("pringing");
+void TimerScreen::print(String s) {
+  display.clearDisplay();
+  display.println(s);
+  display.display();
 
   //  display.setTextSize(2); // Draw 2X-scale text
   // display.setTextColor(SSD1306_WHITE);

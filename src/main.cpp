@@ -13,7 +13,6 @@
 #define TRIGGER_PIN 2
 #define SENSOR_THRESHOLD 4000
 #define MAX_RACE_TIME_IN_SECONDS 9.999
-#define NUM_LANES 4
 
 // https://grandprix-software-central.com/index.php/software/faq/faq/95-gprm-custom - Details for GPRM
 #define COMMAND_GATE_CHECK 'G'                         //This command will ask the timer to check if the start gate is open or not.
@@ -24,7 +23,7 @@ const char *RESPONSE_GATE_OPEN = "GATE OPEN";          //This is the response th
 const char *RESPONSE_GATE_CLOSED = "GATE CLOSED";      //This is the response that the timer will send back to indicate that the start gate is closed.
 const char *RESPONSE_TIMER_STARTED_MESSAGE = "RACING"; //This is the message that the timer will send back to indicate that the heat has started (start gate has opened).
 
-const uint8_t ANALOG_PINS[NUM_LANES] = {33, 32, 39, 36}; //, 31, 35, 25, 26}; // 1st four are right, unsure about the rest
+const uint8_t ANALOG_PINS[8] = {33, 32, 39, 36, 31, 35, 25, 26}; // 1st four are right, unsure about the rest
 
 enum LaneStatus
 {
@@ -45,15 +44,17 @@ enum RaceStatus
 };
 struct LaneInfo
 {
+  int laneNumber;
   LaneStatus status;
   unsigned long finishTime;
 };
-LaneInfo *Lanes = new LaneInfo[NUM_LANES];
+
 RaceStatus raceStatus;
 TriggerStatus triggerStatus;
 
 unsigned long raceBegin = 0;
 unsigned long raceEnd = 0;
+int NUM_LANES = 0;
 
 TimerScreen screen;
 Bounce trigger = Bounce();
@@ -63,6 +64,10 @@ const unsigned long MAX_LONG = 4294967295;
 int ledState = HIGH;
 int LED_PIN = LED_BUILTIN;
 //bool isRaceInProgress = false;
+
+using namespace std;
+vector<LaneInfo> Lanes;
+
 
 float getTimeInSeconds(unsigned long raceBeginTime, unsigned long endTime)
 {
@@ -108,15 +113,12 @@ RaceStatus pollLanes()
     if (Lanes[i].status == Racing)
     {
       uint16_t sensorValue = analogRead(ANALOG_PINS[i]);
-      //sprintf(buffer, "Lane %d sensorValue: %d", i, sensorValue);
-      //Serial.println(buffer);
+      // if (random(1, 100) > 3) sensorValue = SENSOR_THRESHOLD + 1; //introduce some randomness for testing the sort. hey, wheres the unit tests?
       if (sensorValue < SENSOR_THRESHOLD)
       {
         //sensor tripped, record time
         Lanes[i].finishTime = micros();
         Lanes[i].status = Finished;
-        //sprintf(buffer, "Lane %d: %lu", i, Lanes[i].finishTime);
-        //Serial.println(buffer);
         finishCount++;
       }
     }
@@ -163,8 +165,7 @@ void setup()
 
   screen = TimerScreen();
   screen.setup();
-  screen.print("aaaa");
-screen.print("bbbb");
+
   // SELECT ONE OF THE FOLLOWING :
   // 1) IF YOUR INPUT HAS AN INTERNAL PULL-UP
   // bounce.attach( BOUNCE_PIN ,  INPUT_PULLUP ); // USE INTERNAL PULL-UP
@@ -176,7 +177,16 @@ screen.print("bbbb");
   raceStatus = Idle;
   trigger.update();
   triggerStatus = getTriggerStatus(trigger.read());
+
+  //add lanes
+  NUM_LANES = 4; //TODO: Loop through sensors to see which ones are valid to get this number;
+  for (int i = 0; i < NUM_LANES; i++)
+  {
+    Lanes.push_back((struct LaneInfo){.laneNumber=i+1, .status=Finished, .finishTime = 0});
+  }
 }
+
+auto laneTimeSorterFunction = [](LaneInfo a, LaneInfo b) { return a.finishTime < b.finishTime; };
 
 void outputRaceTimes()
 {
@@ -185,17 +195,16 @@ void outputRaceTimes()
   //sprintf(buffer, "Lane %d sensorValue: %d", i, sensorValue);
   String result;
   result.clear();
+  
+  //sort by the lane order
+  std::sort(std::begin(Lanes), std::end(Lanes), laneTimeSorterFunction);
 
   for (int i = 0; i < NUM_LANES; i++)
   {
-    //to serial
-    Serial.printf("%d %3.4f  ", (i + 1), getTimeInSeconds(raceBegin, Lanes[i].finishTime));
-    
-    //for screen
-    sprintf(buffer,"%d %3.4f\n", (i + 1), getTimeInSeconds(raceBegin, Lanes[i].finishTime));
+    sprintf(buffer,"%d %3.4f\n", Lanes[i].laneNumber, getTimeInSeconds(raceBegin, Lanes[i].finishTime));
     result.concat(buffer);
   }
-  Serial.println();
+  Serial.println(result);
   screen.displayResults(result);
 }
 
@@ -225,7 +234,6 @@ void loop()
       raceBegin = micros();
       raceStatus = RaceInProgress;
       updateLEDs();
-      delay(1000);
     }
   }
 
@@ -277,7 +285,7 @@ void loop()
       }
       else
       {
-        Serial.println("GATE OPEN");
+        Serial.println(RESPONSE_GATE_OPEN);
       }
     default:
       break;

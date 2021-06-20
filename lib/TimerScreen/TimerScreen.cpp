@@ -44,12 +44,16 @@ void TimerScreen::setup() {
   display.clearDisplay();
   display.setTextSize(2);
   display.setTextColor(SSD1306_WHITE);
+  display.display();
 }
 
 void TimerScreen::print(String s) {
-  display.clearDisplay();
-  display.println(s);
-  display.display();
+    display.clearDisplay();
+    display.setTextSize(2);
+    display.setCursor(0,0);
+    display.setTextColor(SSD1306_WHITE);
+    display.print(s);
+    display.display();
 
   //  display.setTextSize(2); // Draw 2X-scale text
   // display.setTextColor(SSD1306_WHITE);
@@ -64,10 +68,10 @@ void TimerScreen::print(String s) {
 
 void TimerScreen::displayResults(String s) 
 {
-    display.clearDisplay();
-    display.setTextSize(2);
-    display.setCursor(0,0);
-    display.setTextColor(SSD1306_WHITE);
-    display.print(s);
-    display.display();
+    print(s);
+}
+
+void TimerScreen::displaySensorReadout(String s) 
+{
+    print(s);
 }

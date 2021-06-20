@@ -32,6 +32,7 @@ public:
     void setup();
 	void print(String s);
     void displayResults(String s);
+    void displaySensorReadout(String s);
 };
 
 

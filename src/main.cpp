@@ -6,13 +6,17 @@
 // #include <Adafruit_SSD1306.h>
 #include <TimerScreen.h>
 
-#define ANALOG_PIN_LANE_4 36 //4
-#define ANALOG_PIN_LANE_3 39 //3
-#define ANALOG_PIN_LANE_2 32 //2
-#define ANALOG_PIN_LANE_1 33 //1
+// ESP32 WROOM32 Lolin Pinout: https://www.mischianti.org/wp-content/uploads/2020/11/ESP32-WeMos-LOLIN32-pinout-mischianti.png
 #define TRIGGER_PIN 2
-#define SENSOR_THRESHOLD 4000
-#define MAX_RACE_TIME_IN_SECONDS 9.999
+#define RACING_LED 17
+#define RACING_LED_CHANNEL 1
+#define GATESTATUS_LED 16
+#define GATESTATUS_LED_CHANNEL 0  //for PWM Dimming
+#define MODESWITCH_PIN 12
+#define SENSOR_THRESHOLD 3500
+#define MAX_RACE_TIME_IN_SECONDS 9.9999
+#define BRIGHTNESS_LOW 10
+#define BRIGHTNESS_OFF 0
 
 // https://grandprix-software-central.com/index.php/software/faq/faq/95-gprm-custom - Details for GPRM
 #define COMMAND_GATE_CHECK 'G'                         //This command will ask the timer to check if the start gate is open or not.
@@ -22,8 +26,13 @@ const char *RESPONSE_TIMER_READY = "READY";            //This command will tell 
 const char *RESPONSE_GATE_OPEN = "GATE OPEN";          //This is the response that the timer will send back to indicate that the start gate is open.
 const char *RESPONSE_GATE_CLOSED = "GATE CLOSED";      //This is the response that the timer will send back to indicate that the start gate is closed.
 const char *RESPONSE_TIMER_STARTED_MESSAGE = "RACING"; //This is the message that the timer will send back to indicate that the heat has started (start gate has opened).
+const uint8_t LANE_PINS[8] = {33, 32, 39, 36, 34, 35, 25, 26}; // 1st four are right, unsure about the rest
+const short SCREENMODE_LANETIMES = 0;
+const short SCREENMODE_SENSOR_OUTPUT = 1;
+const unsigned long MAX_LONG = 4294967295;
+short LED_PIN = LED_BUILTIN;
 
-const uint8_t ANALOG_PINS[8] = {33, 32, 39, 36, 31, 35, 25, 26}; // 1st four are right, unsure about the rest
+using namespace std;
 
 enum LaneStatus
 {
@@ -47,31 +56,34 @@ struct LaneInfo
   int laneNumber;
   LaneStatus status;
   unsigned long finishTime;
+  long raceDuration;
 };
 
+
+// Global Variables
 RaceStatus raceStatus;
 TriggerStatus triggerStatus;
 
 unsigned long raceBegin = 0;
 unsigned long raceEnd = 0;
-int NUM_LANES = 0;
+short NUM_LANES = 0;
+short screenMode = 0; 
 
 TimerScreen screen;
 Bounce trigger = Bounce();
-const unsigned long MAX_LONG = 4294967295;
+Bounce screenModeButton = Bounce();
+vector<LaneInfo> Lanes; //essentially an array of Lanes
 
-// SET A VARIABLE TO STORE THE LED STATE
-int ledState = HIGH;
-int LED_PIN = LED_BUILTIN;
-//bool isRaceInProgress = false;
-
-using namespace std;
-vector<LaneInfo> Lanes;
-
-
-float getTimeInSeconds(unsigned long raceBeginTime, unsigned long endTime)
+// Computes the time in seconds from beginning of race
+float getTimeInSeconds(long durationInMicros)
 {
-  unsigned long durationInMicros = 0;
+  return (durationInMicros / 1000000.0);
+}
+
+// Computes the time in seconds from beginning of race
+long computeDuration(unsigned long raceBeginTime, unsigned long endTime)
+{
+  long durationInMicros = 0;
   if (endTime < raceBeginTime)
   {
     //we overflowed the micros() limit (about every 50 minutes of ON time)
@@ -81,24 +93,26 @@ float getTimeInSeconds(unsigned long raceBeginTime, unsigned long endTime)
   {
     durationInMicros = endTime - raceBeginTime;
   }
-  return (durationInMicros / 1000000.0);
+  return durationInMicros;
 }
 
 RaceStatus checkForTooLongOfARace()
 {
-  if (getTimeInSeconds(raceBegin, micros()) > MAX_RACE_TIME_IN_SECONDS)
+  unsigned long currentMicros = micros();
+  long currentDuration = computeDuration(raceBegin, currentMicros);
+  if (getTimeInSeconds(currentDuration) > MAX_RACE_TIME_IN_SECONDS)
   {
     //abort race, too long;
-    unsigned long finishTimeForSlowRacers = micros() + 1000000;
     for (unsigned short int i = 0; i < NUM_LANES; i++)
     {
       if (Lanes[i].status != Finished)
       {
-        Lanes[i].finishTime = finishTimeForSlowRacers;
+        Lanes[i].raceDuration = (MAX_RACE_TIME_IN_SECONDS * 1000000);
+        Lanes[i].finishTime = 0;
         Lanes[i].status = TooSlow;
       }
     }
-    raceEnd = micros();
+    raceEnd = currentMicros;
     return RaceDone;
   }
   return RaceInProgress;
@@ -112,12 +126,13 @@ RaceStatus pollLanes()
   {
     if (Lanes[i].status == Racing)
     {
-      uint16_t sensorValue = analogRead(ANALOG_PINS[i]);
-      // if (random(1, 100) > 3) sensorValue = SENSOR_THRESHOLD + 1; //introduce some randomness for testing the sort. hey, wheres the unit tests?
+      uint16_t sensorValue = analogRead(LANE_PINS[i]);
+      //if (random(1, 10000) > 3) sensorValue = SENSOR_THRESHOLD + 1; //introduce some randomness for testing the sort. hey, wheres the unit tests?
       if (sensorValue < SENSOR_THRESHOLD)
       {
         //sensor tripped, record time
         Lanes[i].finishTime = micros();
+        Lanes[i].raceDuration = computeDuration(raceBegin, Lanes[i].finishTime);
         Lanes[i].status = Finished;
         finishCount++;
       }
@@ -142,6 +157,7 @@ void initializeLanesForRacing(LaneStatus newLaneStatus)
   for (int i = 0; i < NUM_LANES; i++)
   {
     Lanes[i].finishTime = 0;
+    Lanes[i].raceDuration = 0;
     Lanes[i].status = newLaneStatus;
   }
 }
@@ -155,97 +171,155 @@ TriggerStatus getTriggerStatus(int input)
   return Released;
 }
 
+void AdjustIndicatorLED(short channel, short brightness) {
+  ledcWrite(channel, brightness);
+}
+
 void setup()
 {
   Serial.begin(9600);
+  raceStatus = Idle;
 
   // LED SETUP
   pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, ledState);
+  digitalWrite(LED_PIN, LOW);
 
+  // INDICATOR LED SETUP, driven by PWM
+  ledcSetup(GATESTATUS_LED_CHANNEL, 2500, 8);
+  ledcSetup(RACING_LED_CHANNEL, 2500, 8);
+  ledcAttachPin(GATESTATUS_LED, GATESTATUS_LED_CHANNEL);
+  ledcAttachPin(RACING_LED, RACING_LED_CHANNEL);
+
+  // Screen Setup
   screen = TimerScreen();
   screen.setup();
 
-  // SELECT ONE OF THE FOLLOWING :
-  // 1) IF YOUR INPUT HAS AN INTERNAL PULL-UP
-  // bounce.attach( BOUNCE_PIN ,  INPUT_PULLUP ); // USE INTERNAL PULL-UP
-  // 2) IF YOUR INPUT USES AN EXTERNAL PULL-UP
+  // Gate/Trigger Setup
   trigger.attach(TRIGGER_PIN, INPUT_PULLUP); // USE EXTERNAL PULL-UP
-
-  // DEBOUNCE INTERVAL IN MILLISECONDS
-  trigger.interval(25); // interval in ms
-  raceStatus = Idle;
+  trigger.interval(5);   // DEBOUNCE INTERVAL IN MILLISECONDS
   trigger.update();
   triggerStatus = getTriggerStatus(trigger.read());
 
-  //add lanes
+  // Screen Mode Button Toggler Setup
+  screenModeButton.attach(MODESWITCH_PIN, INPUT_PULLUP); // USE EXTERNAL PULL-UP
+  screenModeButton.interval(25);   // DEBOUNCE INTERVAL IN MILLISECONDS
+  screenModeButton.update();
+
+  // Add Lanes
   NUM_LANES = 4; //TODO: Loop through sensors to see which ones are valid to get this number;
   for (int i = 0; i < NUM_LANES; i++)
   {
-    Lanes.push_back((struct LaneInfo){.laneNumber=i+1, .status=Finished, .finishTime = 0});
+    Lanes.push_back((struct LaneInfo){.laneNumber=i+1, .status=Finished, .finishTime = 0, .raceDuration = 0});
   }
 }
 
-auto laneTimeSorterFunction = [](LaneInfo a, LaneInfo b) { return a.finishTime < b.finishTime; };
+// Sorting Functions
+auto laneTimeSorterFunction = [](LaneInfo a, LaneInfo b) { return a.raceDuration < b.raceDuration; };
+auto laneNumberSorterFunction = [](LaneInfo a, LaneInfo b) { return a.laneNumber < b.laneNumber; };
 
 void outputRaceTimes()
 {
   char buffer[200];
-  //sprintf(buffer, "Lane %d sensorValue: %d", i, sensorValue);
-  //sprintf(buffer, "Lane %d sensorValue: %d", i, sensorValue);
   String result;
-  result.clear();
+  result.clear(); 
   
-  //sort by the lane order
-  std::sort(std::begin(Lanes), std::end(Lanes), laneTimeSorterFunction);
+  sort(begin(Lanes), end(Lanes), laneTimeSorterFunction);
 
   for (int i = 0; i < NUM_LANES; i++)
   {
-    sprintf(buffer,"%d %3.4f\n", Lanes[i].laneNumber, getTimeInSeconds(raceBegin, Lanes[i].finishTime));
+    sprintf(buffer,"%d %3.4f\n", Lanes[i].laneNumber, getTimeInSeconds(Lanes[i].raceDuration));
     result.concat(buffer);
   }
   Serial.println(result);
   screen.displayResults(result);
 }
 
+void outputSensorReadouts()
+{
+  char buffer[200];
+  String result;
+  result.clear();
+
+  sort(begin(Lanes), end(Lanes), laneNumberSorterFunction);
+
+  for (unsigned short int i = 0; i < NUM_LANES; i++)
+  {
+    uint16_t sensorValue = analogRead(LANE_PINS[i]);
+    sprintf(buffer,"%d %d\n", Lanes[i].laneNumber, sensorValue);
+    result.concat(buffer);
+  }
+  screen.displaySensorReadout(result);
+}
+
+
 void updateLEDs()
 {
   if (raceStatus == RaceInProgress)
   {
     digitalWrite(LED_PIN, LOW);
+    AdjustIndicatorLED(RACING_LED_CHANNEL, BRIGHTNESS_LOW);
   }
   else
   {
     digitalWrite(LED_PIN, HIGH);
+    AdjustIndicatorLED(RACING_LED_CHANNEL, BRIGHTNESS_OFF);
+  }
+
+  if (triggerStatus == ReadyToRelease) {
+    AdjustIndicatorLED(GATESTATUS_LED_CHANNEL, BRIGHTNESS_LOW);
+  }
+  else 
+  {
+    AdjustIndicatorLED(GATESTATUS_LED_CHANNEL, BRIGHTNESS_OFF);
   }
 }
 
 void loop()
 {
+
+  // Check for Gate Trigger
   trigger.update();
   if (trigger.changed())
   {
-    int deboucedInput = trigger.read();
-    triggerStatus = getTriggerStatus(deboucedInput);
+    int debouncedTriggerInput = trigger.read();
+    triggerStatus = getTriggerStatus(debouncedTriggerInput);
     if (raceStatus != RaceInProgress && triggerStatus == Released)
     {
+      raceBegin = micros();
       initializeLanesForRacing(Racing);
       Serial.println(RESPONSE_TIMER_STARTED_MESSAGE);
-      raceBegin = micros();
       raceStatus = RaceInProgress;
+      screenMode = SCREENMODE_LANETIMES;
+      screen.print("Race\nIn\nProgress");
       updateLEDs();
     }
   }
 
+  // Check for Screen Mode Button Press
+  screenModeButton.update();
+  if (screenModeButton.fell())
+  {
+    screenMode = !screenMode;
+    if(screenMode == SCREENMODE_LANETIMES) {
+      outputRaceTimes();
+    }
+  }
+
+  if(screenMode == SCREENMODE_SENSOR_OUTPUT) {
+    outputSensorReadouts();
+  }
+
+  // Update the LEDs to proper status
   updateLEDs();
 
-  //handle state changes
+  // Handle state changes
   switch (raceStatus)
   {
   case RaceInProgress:
     raceStatus = pollLanes();
     break;
   case RaceDone:
+    screenMode = SCREENMODE_LANETIMES;
     outputRaceTimes();
     raceStatus = Idle;
     break;
@@ -275,7 +349,7 @@ void loop()
       }
       break;
     case COMMAND_FORCE_DATA_SEND:
-      outputRaceTimes(); //TODO This really isn't fully/properly implmented.
+      outputRaceTimes(); //TODO This really isn't fully/properly implemented.
       break;
     case COMMAND_TIMER_RESET:
       initializeLanesForRacing(Finished);

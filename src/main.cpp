@@ -2,17 +2,16 @@
 #include <Bounce2.h>
 #include <SPI.h>
 #include <Wire.h>
-// #include <Adafruit_GFX.h>
-// #include <Adafruit_SSD1306.h>
 #include <TimerScreen.h>
 
 // ESP32 WROOM32 Lolin Pinout: https://www.mischianti.org/wp-content/uploads/2020/11/ESP32-WeMos-LOLIN32-pinout-mischianti.png
-#define TRIGGER_PIN 2
-#define RACING_LED 17
+#define TRIGGER_PIN 2                   //connect to GND
+#define RACING_LED 17                   //connect negative/cathode lead to GND
 #define RACING_LED_CHANNEL 1
-#define GATESTATUS_LED 16
-#define GATESTATUS_LED_CHANNEL 0  //for PWM Dimming
-#define MODESWITCH_PIN 12
+#define GATESTATUS_LED 16               //connect negative/cathode lead to GND
+#define GATESTATUS_LED_CHANNEL 0        //for PWM Dimming
+#define MODESWITCH_PIN 12               //connect to GND
+#define EXTRABUTTON_PIN 14              //future use, connect to GND
 #define SENSOR_THRESHOLD 3500
 #define MAX_RACE_TIME_IN_SECONDS 9.9999
 #define BRIGHTNESS_LOW 10
@@ -29,6 +28,7 @@ const char *RESPONSE_TIMER_STARTED_MESSAGE = "RACING"; //This is the message tha
 const uint8_t LANE_PINS[8] = {33, 32, 39, 36, 34, 35, 25, 26}; // 1st four are right, unsure about the rest
 const short SCREENMODE_LANETIMES = 0;
 const short SCREENMODE_SENSOR_OUTPUT = 1;
+const short SCREENMODE_LANE_SUMMARY = 2;
 const unsigned long MAX_LONG = 4294967295;
 short LED_PIN = LED_BUILTIN;
 
@@ -38,7 +38,8 @@ enum LaneStatus
 {
   Racing,
   Finished,
-  TooSlow
+  TooSlow,
+  NotInUse //lane cannot be found during boot
 };
 enum TriggerStatus //aka Gate
 {
@@ -66,12 +67,13 @@ TriggerStatus triggerStatus;
 
 unsigned long raceBegin = 0;
 unsigned long raceEnd = 0;
-short NUM_LANES = 0;
+short NUM_LANES = 4; //Number of lanes the device is capable to monitor.
 short screenMode = 0; 
 
 TimerScreen screen;
 Bounce trigger = Bounce();
 Bounce screenModeButton = Bounce();
+Bounce extraButton = Bounce();
 vector<LaneInfo> Lanes; //essentially an array of Lanes
 
 // Computes the time in seconds from beginning of race
@@ -154,7 +156,7 @@ RaceStatus pollLanes()
 
 void initializeLanesForRacing(LaneStatus newLaneStatus)
 {
-  for (int i = 0; i < NUM_LANES; i++)
+  for (unsigned short int i = 0; i < NUM_LANES; i++)
   {
     Lanes[i].finishTime = 0;
     Lanes[i].raceDuration = 0;
@@ -175,6 +177,57 @@ void AdjustIndicatorLED(short channel, short brightness) {
   ledcWrite(channel, brightness);
 }
 
+void detectPresenceOfLanes() {
+    Lanes.clear();
+
+    // Detect and register lanes
+    unsigned short int activeLaneCount = 0;
+    for (unsigned short int i = 0; i < NUM_LANES; i++)
+    {
+      uint16_t sensorValue = analogRead(LANE_PINS[i]);
+      LaneStatus ls = Finished;
+      if (sensorValue < SENSOR_THRESHOLD) {
+        ls = NotInUse;
+      } else {
+        activeLaneCount++;
+      }
+      Lanes.push_back((struct LaneInfo){.laneNumber=i+1, .status=ls, .finishTime = 0, .raceDuration = 0});
+    }
+  
+    char buffer[200]; 
+    String result;
+    result.clear(); 
+    
+    sprintf(buffer,"Detected\n%d Lanes\n", activeLaneCount);
+    result.concat(buffer);
+
+    //List Lane Numbers
+    for (unsigned short int i = 0; i < NUM_LANES; i++)
+    {
+      sprintf(buffer,"%i", Lanes[i].laneNumber);
+      result.concat(buffer);
+    }
+
+    result.concat('\n');
+
+    //List Lane status
+    for (unsigned short int i = 0; i < NUM_LANES; i++)
+    {
+      LaneInfo li = Lanes[i];
+      if (li.status == NotInUse) {
+        sprintf(buffer,"X");
+      } else {
+        sprintf(buffer,"%i", li.laneNumber);
+      }
+
+      result.concat(buffer);
+    }
+
+    //Print
+    Serial.println(result);
+    screen.displayResults(result);
+}
+
 void setup()
 {
   Serial.begin(9600);
@@ -193,24 +246,26 @@ void setup()
   // Screen Setup
   screen = TimerScreen();
   screen.setup();
+  screen.print("Booted...");
 
   // Gate/Trigger Setup
   trigger.attach(TRIGGER_PIN, INPUT_PULLUP); // USE EXTERNAL PULL-UP
-  trigger.interval(5);   // DEBOUNCE INTERVAL IN MILLISECONDS
+  trigger.interval(5); // DEBOUNCE INTERVAL IN MILLISECONDS
   trigger.update();
   triggerStatus = getTriggerStatus(trigger.read());
 
   // Screen Mode Button Toggler Setup
   screenModeButton.attach(MODESWITCH_PIN, INPUT_PULLUP); // USE EXTERNAL PULL-UP
-  screenModeButton.interval(25);   // DEBOUNCE INTERVAL IN MILLISECONDS
+  screenModeButton.interval(100); // DEBOUNCE INTERVAL IN MILLISECONDS
   screenModeButton.update();
 
-  // Add Lanes
-  NUM_LANES = 4; //TODO: Loop through sensors to see which ones are valid to get this number;
-  for (int i = 0; i < NUM_LANES; i++)
-  {
-    Lanes.push_back((struct LaneInfo){.laneNumber=i+1, .status=Finished, .finishTime = 0, .raceDuration = 0});
-  }
+  // Screen Mode Button Toggler Setup
+  extraButton.attach(EXTRABUTTON_PIN, INPUT_PULLUP); // USE EXTERNAL PULL-UP
+  extraButton.interval(100); // DEBOUNCE INTERVAL IN MILLISECONDS
+  extraButton.update();
+
+  detectPresenceOfLanes();
+
 }
 
 // Sorting Functions
@@ -225,7 +280,7 @@ void outputRaceTimes()
   
   sort(begin(Lanes), end(Lanes), laneTimeSorterFunction);
 
-  for (int i = 0; i < NUM_LANES; i++)
+  for (unsigned short int i = 0; i < NUM_LANES; i++)
   {
     sprintf(buffer,"%d %3.4f\n", Lanes[i].laneNumber, getTimeInSeconds(Lanes[i].raceDuration));
     result.concat(buffer);
@@ -299,15 +354,31 @@ void loop()
   screenModeButton.update();
   if (screenModeButton.fell())
   {
-    screenMode = !screenMode;
-    if(screenMode == SCREENMODE_LANETIMES) {
-      outputRaceTimes();
+    screenMode++;
+    if(screenMode > 2) screenMode = 0;
+    switch (screenMode % 3)
+    {
+      case SCREENMODE_LANETIMES:
+        outputRaceTimes();
+        break;
+      case SCREENMODE_SENSOR_OUTPUT:
+        detectPresenceOfLanes();  
+        break;
+      case SCREENMODE_LANE_SUMMARY:
+        detectPresenceOfLanes();  
+        break;
+      default:
+        Serial.println("Unknown screenMode");
+        break;
     }
   }
 
   if(screenMode == SCREENMODE_SENSOR_OUTPUT) {
     outputSensorReadouts();
   }
+
+  // uint16_t sensorValue = analogRead(TRIGGER_PIN);
+  // Serial.println(sensorValue);
 
   // Update the LEDs to proper status
   updateLEDs();

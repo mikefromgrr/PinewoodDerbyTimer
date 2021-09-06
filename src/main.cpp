@@ -5,6 +5,7 @@
 #include <TimerScreen.h>
 
 // ESP32 WROOM32 Lolin Pinout: https://www.mischianti.org/wp-content/uploads/2020/11/ESP32-WeMos-LOLIN32-pinout-mischianti.png
+// More Details: https://www.mischianti.org/2021/07/30/esp32-wemos-lolin32-lite-high-resolution-pinout-and-specs/
 #define TRIGGER_PIN 2                   //connect to GND
 #define RACING_LED 17                   //connect negative/cathode lead to GND
 #define RACING_LED_CHANNEL 1

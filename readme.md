@@ -21,7 +21,7 @@ Designed for ESP32 WeMos Mini D1 ESP-WROOM-32.
 * https://www.aliexpress.com/item/1005001621896126.html
 * Cost: About $3.81 USD in March 2021, plus shipping.
 * ![ESP32](docs/media/ESP32Board.png)
-* ![Pin Out](docs/media/ESP32-WeMos-LOLIN32-pinout-mischianti.png) | [Details]|(https://www.mischianti.org/2021/07/30/esp32-wemos-lolin32-lite-high-resolution-pinout-and-specs/)
+* [![Pin Out](docs/media/ESP32-WeMos-LOLIN32-pinout-mischianti.png)](https://www.mischianti.org/2021/07/30/esp32-wemos-lolin32-lite-high-resolution-pinout-and-specs/ "ESP32 Wemos Lolin32 Pinout")
 
 ## SSD1306 Serial OLED Screen
 * https://www.aliexpress.com/item/1005001621806398.html

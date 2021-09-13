@@ -260,7 +260,7 @@ void setup()
   screenModeButton.interval(100); // DEBOUNCE INTERVAL IN MILLISECONDS
   screenModeButton.update();
 
-  // Screen Mode Button Toggler Setup
+  // Extra Button Setup
   extraButton.attach(EXTRABUTTON_PIN, INPUT_PULLUP); // USE EXTERNAL PULL-UP
   extraButton.interval(100); // DEBOUNCE INTERVAL IN MILLISECONDS
   extraButton.update();
@@ -330,6 +330,25 @@ void updateLEDs()
   }
 }
 
+void processCurrentScreenMode() {
+  if(screenMode > 2) screenMode = 0;
+  switch (screenMode % 3)
+  {
+    case SCREENMODE_LANETIMES:
+      outputRaceTimes();
+      break;
+    case SCREENMODE_SENSOR_OUTPUT:
+      detectPresenceOfLanes();
+      break;
+    case SCREENMODE_LANE_SUMMARY:
+      detectPresenceOfLanes();
+      break;
+    default:
+      Serial.println("Unknown screenMode");
+      break;
+  }
+}
+
 void loop()
 {
 
@@ -351,35 +370,30 @@ void loop()
     }
   }
 
-  // Check for Screen Mode Button Press
+  // Button Presses
+  extraButton.update();
   screenModeButton.update();
-  if (screenModeButton.fell())
-  {
-    screenMode++;
-    if(screenMode > 2) screenMode = 0;
-    switch (screenMode % 3)
+
+  if (extraButton.read() == LOW) {
+    // Print message so user doens't think button is broken.
+    // Shown only when button is held.
+    screen.print("This\nbutton\ndoes\nnothing.");
+  } else {
+    if (screenModeButton.fell())
     {
-      case SCREENMODE_LANETIMES:
-        outputRaceTimes();
-        break;
-      case SCREENMODE_SENSOR_OUTPUT:
-        detectPresenceOfLanes();  
-        break;
-      case SCREENMODE_LANE_SUMMARY:
-        detectPresenceOfLanes();  
-        break;
-      default:
-        Serial.println("Unknown screenMode");
-        break;
+      screenMode++;
+      processCurrentScreenMode();
+    }
+
+    if(screenMode == SCREENMODE_SENSOR_OUTPUT) {
+      outputSensorReadouts();
     }
   }
 
-  if(screenMode == SCREENMODE_SENSOR_OUTPUT) {
-    outputSensorReadouts();
+  if (extraButton.rose()) {
+    // Returns screen to prior state
+    processCurrentScreenMode();
   }
-
-  // uint16_t sensorValue = analogRead(TRIGGER_PIN);
-  // Serial.println(sensorValue);
 
   // Update the LEDs to proper status
   updateLEDs();

@@ -40,9 +40,9 @@ enum LaneStatus
   Racing,
   Finished,
   TooSlow,
-  NotInUse //lane cannot be found during boot
+  NotInUse // lane cannot be found during boot
 };
-enum TriggerStatus //aka Gate
+enum TriggerStatus // aka Gate
 {
   ReadyToRelease,
   Released
@@ -68,14 +68,14 @@ TriggerStatus triggerStatus;
 
 unsigned long raceBegin = 0;
 unsigned long raceEnd = 0;
-short NUM_LANES = 4; //Number of lanes the device is capable to monitor.
+short NUM_LANES = 4; // Number of lanes the device is capable to monitor.
 short screenMode = 0; 
 
 TimerScreen screen;
 Bounce trigger = Bounce();
 Bounce screenModeButton = Bounce();
 Bounce extraButton = Bounce();
-vector<LaneInfo> Lanes; //essentially an array of Lanes
+vector<LaneInfo> Lanes; // essentially an array of Lanes
 
 // Computes the time in seconds from beginning of race
 float getTimeInSeconds(long durationInMicros)
@@ -89,7 +89,7 @@ long computeDuration(unsigned long raceBeginTime, unsigned long endTime)
   long durationInMicros = 0;
   if (endTime < raceBeginTime)
   {
-    //we overflowed the micros() limit (about every 50 minutes of ON time)
+    // We overflowed the micros() limit (about every 50 minutes of ON time)
     durationInMicros = (MAX_LONG - raceBeginTime) + endTime;
   }
   else
@@ -105,7 +105,7 @@ RaceStatus checkForTooLongOfARace()
   long currentDuration = computeDuration(raceBegin, currentMicros);
   if (getTimeInSeconds(currentDuration) > MAX_RACE_TIME_IN_SECONDS)
   {
-    //abort race, too long;
+    // Abort race, too long;
     for (unsigned short int i = 0; i < NUM_LANES; i++)
     {
       if (Lanes[i].status != Finished)
@@ -123,17 +123,17 @@ RaceStatus checkForTooLongOfARace()
 
 RaceStatus pollLanes()
 {
-  //poll lanes
+  // Poll lanes
   unsigned short int finishCount = 0;
   for (unsigned short int i = 0; i < NUM_LANES; i++)
   {
     if (Lanes[i].status == Racing)
     {
       uint16_t sensorValue = analogRead(LANE_PINS[i]);
-      //if (random(1, 10000) > 3) sensorValue = SENSOR_THRESHOLD + 1; //introduce some randomness for testing the sort. hey, wheres the unit tests?
+      // if (random(1, 10000) > 3) sensorValue = SENSOR_THRESHOLD + 1; //introduce some randomness for testing the sort. hey, wheres the unit tests?
       if (sensorValue < SENSOR_THRESHOLD)
       {
-        //sensor tripped, record time
+        // Sensor tripped, record time
         Lanes[i].finishTime = micros();
         Lanes[i].raceDuration = computeDuration(raceBegin, Lanes[i].finishTime);
         Lanes[i].status = Finished;
@@ -142,7 +142,7 @@ RaceStatus pollLanes()
     }
     else
     {
-      //lane is already finished
+      // Lane is already finished
       finishCount++;
     }
   }
@@ -202,7 +202,7 @@ void detectPresenceOfLanes() {
     sprintf(buffer,"Detected\n%d Lanes\n", activeLaneCount);
     result.concat(buffer);
 
-    //List Lane Numbers
+    // List Lane Numbers
     for (unsigned short int i = 0; i < NUM_LANES; i++)
     {
       sprintf(buffer,"%i", Lanes[i].laneNumber);
@@ -211,7 +211,7 @@ void detectPresenceOfLanes() {
 
     result.concat('\n');
 
-    //List Lane status
+    // List Lane Status
     for (unsigned short int i = 0; i < NUM_LANES; i++)
     {
       LaneInfo li = Lanes[i];
@@ -224,7 +224,7 @@ void detectPresenceOfLanes() {
       result.concat(buffer);
     }
 
-    //Print
+    // Output to Screen
     Serial.println(result);
     screen.displayResults(result);
 }
@@ -416,11 +416,11 @@ void loop()
     break;
   }
 
-  //sniff for incoming commands from software via the serial connection
+  // Sniff for incoming commands from software via the serial connection
   int incomingByte = 0; // for incoming serial data
   if (Serial.available() > 0)
   {
-    //read the incoming byte
+    // Read the incoming byte
     incomingByte = Serial.read();
     switch (incomingByte)
     {

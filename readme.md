@@ -14,11 +14,11 @@ It's primarily designed to interface with a Windows laptop running the [GrandPri
 
 Though it shouldn't be too difficult to add support for any of these.
 
+## License
+You cannot use this software or any derivative of it for commercial purposes (e.g. sell a hardware timer based off of this design/code). 
+
 # Hardware
 Designed for ESP32 WeMos Mini D1 ESP-WROOM-32.
-
-# License
-You cannot use this software or any derivative of it for commercial purposes (e.g. sell a hardware timer based off of this design/code). 
 
 ## ESP32
 * https://www.aliexpress.com/item/1005001621896126.html

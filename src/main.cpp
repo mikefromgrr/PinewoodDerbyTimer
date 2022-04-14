@@ -55,10 +55,11 @@ enum RaceStatus
 };
 struct LaneInfo
 {
+  unsigned int pin;
   int laneNumber;
   LaneStatus status;
   unsigned long finishTime;
-  long raceDuration;
+  unsigned long raceDuration;
 };
 
 
@@ -84,9 +85,9 @@ float getTimeInSeconds(long durationInMicros)
 }
 
 // Computes the time in seconds from beginning of race
-long computeDuration(unsigned long raceBeginTime, unsigned long endTime)
+unsigned long computeDuration(unsigned long raceBeginTime, unsigned long endTime)
 {
-  long durationInMicros = 0;
+  unsigned long durationInMicros = 0;
   if (endTime < raceBeginTime)
   {
     // We overflowed the micros() limit (about every 50 minutes of ON time)
@@ -106,13 +107,13 @@ RaceStatus checkForTooLongOfARace()
   if (getTimeInSeconds(currentDuration) > MAX_RACE_TIME_IN_SECONDS)
   {
     // Abort race, too long;
-    for (unsigned short int i = 0; i < NUM_LANES; i++)
+    for (auto& lane : Lanes)
     {
-      if (Lanes[i].status != Finished)
+      if (lane.status != Finished)
       {
-        Lanes[i].raceDuration = (MAX_RACE_TIME_IN_SECONDS * 1000000);
-        Lanes[i].finishTime = 0;
-        Lanes[i].status = TooSlow;
+        lane.raceDuration = (MAX_RACE_TIME_IN_SECONDS * 1000000);
+        lane.finishTime = 0;
+        lane.status = TooSlow;
       }
     }
     raceEnd = currentMicros;
@@ -125,18 +126,19 @@ RaceStatus pollLanes()
 {
   // Poll lanes
   unsigned short int finishCount = 0;
-  for (unsigned short int i = 0; i < NUM_LANES; i++)
+  unsigned long currentMicros = micros();
+  for (auto& lane : Lanes)
   {
-    if (Lanes[i].status == Racing)
+    if (lane.status == Racing)
     {
-      uint16_t sensorValue = analogRead(LANE_PINS[i]);
+      uint16_t sensorValue = analogRead(LANE_PINS[lane.pin]);
       // if (random(1, 10000) > 3) sensorValue = SENSOR_THRESHOLD + 1; //introduce some randomness for testing the sort. hey, wheres the unit tests?
       if (sensorValue < SENSOR_THRESHOLD)
       {
         // Sensor tripped, record time
-        Lanes[i].finishTime = micros();
-        Lanes[i].raceDuration = computeDuration(raceBegin, Lanes[i].finishTime);
-        Lanes[i].status = Finished;
+        lane.finishTime = currentMicros;
+        lane.raceDuration = computeDuration(raceBegin, currentMicros);
+        lane.status = Finished;
         finishCount++;
       }
     }
@@ -157,11 +159,11 @@ RaceStatus pollLanes()
 
 void initializeLanesForRacing(LaneStatus newLaneStatus)
 {
-  for (unsigned short int i = 0; i < NUM_LANES; i++)
+  for (auto& lane : Lanes)
   {
-    Lanes[i].finishTime = 0;
-    Lanes[i].raceDuration = 0;
-    Lanes[i].status = newLaneStatus;
+    lane.finishTime = 0;
+    lane.raceDuration = 0;
+    lane.status = newLaneStatus;
   }
 }
 
@@ -179,8 +181,10 @@ void AdjustIndicatorLED(short channel, short brightness) {
 }
 
 void detectPresenceOfLanes() {
+    // Clear and reserve space in the Lanes vector/array
     Lanes.clear();
-
+    Lanes.reserve(NUM_LANES);
+    
     // Detect and register lanes
     unsigned short int activeLaneCount = 0;
     for (unsigned short int i = 0; i < NUM_LANES; i++)
@@ -192,7 +196,7 @@ void detectPresenceOfLanes() {
       } else {
         activeLaneCount++;
       }
-      Lanes.push_back((struct LaneInfo){.laneNumber=i+1, .status=ls, .finishTime = 0, .raceDuration = 0});
+      Lanes.push_back((struct LaneInfo){.pin=i, .laneNumber=i+1, .status=ls, .finishTime = 0, .raceDuration = 0});
     }
   
     char buffer[200]; 
@@ -203,18 +207,17 @@ void detectPresenceOfLanes() {
     result.concat(buffer);
 
     // List Lane Numbers
-    for (unsigned short int i = 0; i < NUM_LANES; i++)
+    for (auto& lane : Lanes)
     {
-      sprintf(buffer,"%i", Lanes[i].laneNumber);
+      sprintf(buffer,"%i", lane.laneNumber);
       result.concat(buffer);
     }
 
     result.concat('\n');
 
     // List Lane Status
-    for (unsigned short int i = 0; i < NUM_LANES; i++)
+    for (auto& li : Lanes)
     {
-      LaneInfo li = Lanes[i];
       if (li.status == NotInUse) {
         sprintf(buffer,"X");
       } else {
@@ -279,11 +282,10 @@ void outputRaceTimes()
   String result;
   result.clear(); 
   
-  sort(begin(Lanes), end(Lanes), laneTimeSorterFunction);
+  sort(Lanes.begin(), Lanes.end(), laneTimeSorterFunction);
 
-  for (unsigned short int i = 0; i < NUM_LANES; i++)
-  {
-    sprintf(buffer,"%d %3.4f\n", Lanes[i].laneNumber, getTimeInSeconds(Lanes[i].raceDuration));
+  for (auto& lane : Lanes) {
+    sprintf(buffer,"%d %3.4f\n", lane.laneNumber, getTimeInSeconds(lane.raceDuration));
     result.concat(buffer);
   }
   Serial.println(result);
@@ -296,12 +298,12 @@ void outputSensorReadouts()
   String result;
   result.clear();
 
-  sort(begin(Lanes), end(Lanes), laneNumberSorterFunction);
+  sort(Lanes.begin(), Lanes.end(), laneNumberSorterFunction);
 
-  for (unsigned short int i = 0; i < NUM_LANES; i++)
+  for (auto& lane : Lanes)
   {
-    uint16_t sensorValue = analogRead(LANE_PINS[i]);
-    sprintf(buffer,"%d %d\n", Lanes[i].laneNumber, sensorValue);
+    uint16_t sensorValue = analogRead(LANE_PINS[lane.pin]);
+    sprintf(buffer,"%d %d\n", lane.laneNumber, sensorValue);
     result.concat(buffer);
   }
   screen.displaySensorReadout(result);

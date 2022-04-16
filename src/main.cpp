@@ -30,6 +30,7 @@ const uint8_t LANE_PINS[8] = {33, 32, 39, 36, 34, 35, 25, 26}; // 1st four are r
 const short SCREENMODE_LANETIMES = 0;
 const short SCREENMODE_SENSOR_OUTPUT = 1;
 const short SCREENMODE_LANE_SUMMARY = 2;
+const short SCREENMODE_SOFTWARE_IS_RACE_READY = 3;
 const unsigned long MAX_LONG = 4294967295;
 short LED_PIN = LED_BUILTIN;
 
@@ -333,8 +334,7 @@ void updateLEDs()
 }
 
 void processCurrentScreenMode() {
-  if(screenMode > 2) screenMode = 0;
-  switch (screenMode % 3)
+  switch (screenMode)
   {
     case SCREENMODE_LANETIMES:
       outputRaceTimes();
@@ -344,6 +344,9 @@ void processCurrentScreenMode() {
       break;
     case SCREENMODE_LANE_SUMMARY:
       detectPresenceOfLanes();
+      break;
+    case SCREENMODE_SOFTWARE_IS_RACE_READY:
+      screen.print("Software\nawaiting\nrace\nstart.");
       break;
     default:
       Serial.println("Unknown screenMode");
@@ -384,6 +387,7 @@ void loop()
     if (screenModeButton.fell())
     {
       screenMode++;
+      if(screenMode > 2) screenMode = 0;
       processCurrentScreenMode();
     }
 
@@ -444,10 +448,13 @@ void loop()
       if (triggerStatus == ReadyToRelease)
       {
         Serial.println(RESPONSE_TIMER_READY);
+        screenMode = SCREENMODE_SOFTWARE_IS_RACE_READY;
+        raceStatus = Idle;
+        processCurrentScreenMode();
       }
       else
       {
-        Serial.println(RESPONSE_GATE_OPEN);
+        Serial.println(RESPONSE_GATE_OPEN); 
       }
     default:
       break;
